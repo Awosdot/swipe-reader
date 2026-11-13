@@ -1,0 +1,45 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Keep a copy as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swipe-reader-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish APK to a release for one-tap download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk swipe-reader.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest swipe-reader.apk \
+            --title "Swipe Reader (latest)" \
+            --notes "Latest build. Download swipe-reader.apk and install it." \
+            --target "${{ github.sha }}"
