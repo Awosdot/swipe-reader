@@ -50,6 +50,7 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var nextCard: LinearLayout
     private lateinit var nextTitle: TextView
     private lateinit var nextHint: TextView
+    private lateinit var nextLabel: TextView
 
     private val main = Handler(Looper.getMainLooper())
     private val exec = Executors.newSingleThreadExecutor()
@@ -146,7 +147,7 @@ class ReaderActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(ContextCompat.getColor(this@ReaderActivity, R.color.accent))
         }
-        val nextLabel = TextView(this).apply {
+        nextLabel = TextView(this).apply {
             text = "Up next"
             textSize = 12f
             setTextColor(Color.parseColor("#9AA0A6"))
@@ -186,6 +187,7 @@ class ReaderActivity : AppCompatActivity() {
         nextCard.setOnTouchListener { _, ev -> nextGesture.onTouchEvent(ev) }
 
         setContentView(root)
+        store.touchToday()
         load(File(path))
     }
 
@@ -255,10 +257,19 @@ class ReaderActivity : AppCompatActivity() {
         if (!finishedShown && lm.findLastCompletelyVisibleItemPosition() >= n - 1) {
             finishedShown = true
             store.setRead(f, true)
-            val nxt = store.queue().firstOrNull { it.file.path != f.path && !store.isRead(it.file) }
+            store.recordFinish(f, n)
+            val nxt = store.nextUnread(f)
+            val (seriesName, seriesRead, seriesTotal) = store.seriesProgress(f)
+            val seriesDone = seriesTotal > 1 && seriesRead >= seriesTotal
             nextFile = nxt?.file
+            nextLabel.text = when {
+                seriesDone && nxt != null -> "$seriesName complete. Next series"
+                seriesDone -> "$seriesName complete"
+                else -> "Up next"
+            }
             nextTitle.text = nxt?.file?.nameWithoutExtension?.replace('_', ' ') ?: "You are all caught up"
-            nextHint.text = if (nxt != null) "↑  Swipe up to read next" else "Tap to go back"
+            val progress = if (seriesTotal > 1) "  ·  $seriesRead of $seriesTotal read" else ""
+            nextHint.text = if (nxt != null) "↑  Swipe up to read next$progress" else "Tap to go back"
             nextCard.visibility = View.VISIBLE
         }
     }

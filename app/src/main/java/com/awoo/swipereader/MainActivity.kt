@@ -21,7 +21,9 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -35,7 +37,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pager: ViewPager2
     private lateinit var message: TextView
     private lateinit var emptyBox: LinearLayout
-    private lateinit var folderButton: TextView
+    private lateinit var topBar: LinearLayout
+    private lateinit var orderButton: TextView
+    private lateinit var streakView: TextView
     private lateinit var permBox: LinearLayout
     private val adapter = CardAdapter()
     private val handler = Handler(Looper.getMainLooper())
@@ -74,17 +78,25 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(emptyBox, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        folderButton = TextView(this).apply {
-            text = "Folder"
-            textSize = 14f
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent))
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            setOnClickListener { pickFolder() }
+        orderButton = link("Series order") { toggleOrder() }
+        topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(link("Stats") { showStats() })
+            addView(orderButton)
+            addView(link("Folder") { pickFolder() })
         }
-        root.addView(folderButton, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+        root.addView(topBar, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
             topMargin = dp(8)
-            rightMargin = dp(8)
+            rightMargin = dp(4)
         })
+
+        streakView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(fg)
+            alpha = 0.7f
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        root.addView(streakView, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START))
 
         permBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -180,11 +192,16 @@ class MainActivity : AppCompatActivity() {
             permBox.visibility = View.VISIBLE
             pager.visibility = View.GONE
             emptyBox.visibility = View.GONE
-            folderButton.visibility = View.GONE
+            topBar.visibility = View.GONE
+            streakView.visibility = View.GONE
             return
         }
         permBox.visibility = View.GONE
-        folderButton.visibility = View.VISIBLE
+        topBar.visibility = View.VISIBLE
+        streakView.visibility = View.VISIBLE
+        orderButton.text = if (store.orderMode() == "series") "Series order" else "Download order"
+        val streak = store.streak()
+        streakView.text = if (streak > 0) "$streak day streak" else ""
         val list = store.queue()
         adapter.submit(list)
         if (list.isEmpty()) {
@@ -195,10 +212,33 @@ class MainActivity : AppCompatActivity() {
         } else {
             emptyBox.visibility = View.GONE
             pager.visibility = View.VISIBLE
-            pager.setCurrentItem(0, false)
+            // Land on the first unread episode so there is always something to read
+            val start = list.indexOfFirst { !store.isRead(it.file) }.coerceAtLeast(0)
+            pager.post { pager.setCurrentItem(start, false) }
         }
         // Folder may have been created since last time
         if (observers.isEmpty()) startWatching()
+    }
+
+    private fun link(label: String, onClick: () -> Unit): TextView = TextView(this).apply {
+        text = label
+        textSize = 14f
+        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent))
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        setOnClickListener { onClick() }
+    }
+
+    private fun toggleOrder() {
+        store.setOrderMode(if (store.orderMode() == "series") "downloaded" else "series")
+        refresh()
+    }
+
+    private fun showStats() {
+        AlertDialog.Builder(this)
+            .setTitle("Your reading")
+            .setMessage(store.statsText())
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun pickFolder() {
@@ -217,7 +257,9 @@ class MainActivity : AppCompatActivity() {
         val count: TextView,
         val img: ImageView,
         val title: TextView,
-        val meta: TextView
+        val meta: TextView,
+        val series: TextView,
+        val bar: ProgressBar
     ) : RecyclerView.ViewHolder(root)
 
     inner class CardAdapter : RecyclerView.Adapter<CardVH>() {
@@ -271,10 +313,18 @@ class MainActivity : AppCompatActivity() {
                 topMargin = c.dp(16)
                 bottomMargin = c.dp(16)
             })
+            val series = TextView(c).apply {
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setTextColor(ContextCompat.getColor(c, R.color.accent))
+            }
+            val bar = ProgressBar(c, null, android.R.attr.progressBarStyleHorizontal)
             root.addView(title, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(meta, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = c.dp(4) })
+            root.addView(series, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = c.dp(6) })
+            root.addView(bar, LinearLayout.LayoutParams(c.dp(180), c.dp(4)).apply { topMargin = c.dp(6) })
+            root.addView(meta, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = c.dp(6) })
             root.addView(hint, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = c.dp(20) })
-            return CardVH(root, count, img, title, meta)
+            return CardVH(root, count, img, title, meta, series, bar)
         }
 
         override fun onBindViewHolder(h: CardVH, position: Int) {
@@ -286,6 +336,20 @@ class MainActivity : AppCompatActivity() {
             h.meta.text = ago
             val state = if (store.isRead(pdf.file)) "read" else "new"
             h.count.text = "${position + 1} of ${items.size}  ·  $state"
+
+            val same = items.filter { it.info.key == pdf.info.key }
+            if (same.size > 1) {
+                val read = same.count { store.isRead(it.file) }
+                val ep = pdf.info.label?.let { "  ·  $it" } ?: ""
+                h.series.text = pdf.info.name + ep + "  ·  $read of ${same.size} read"
+                h.bar.max = same.size
+                h.bar.progress = read
+                h.series.visibility = View.VISIBLE
+                h.bar.visibility = View.VISIBLE
+            } else {
+                h.series.visibility = View.GONE
+                h.bar.visibility = View.GONE
+            }
 
             h.img.setImageDrawable(null)
             h.img.tag = pdf.file.path

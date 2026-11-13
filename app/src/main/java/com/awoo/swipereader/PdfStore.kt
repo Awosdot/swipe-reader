@@ -18,7 +18,56 @@ const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-data class Pdf(val file: File, val modified: Long)
+data class Parsed(val key: String, val name: String, val episode: Int?, val label: String?)
+
+/** Works out which series a file belongs to and which episode it is, from the file name alone. */
+object SeriesParser {
+    private val season = Regex("""\b[sS](\d{1,2})\s*[eE](\d{1,4})\b""")
+    private val word = Regex(
+        """\b(?:episode|ep|chapter|chap|ch|part|pt|vol|volume|book|issue)\b[\s#:\-]*0*(\d{1,4})""",
+        RegexOption.IGNORE_CASE
+    )
+    private val hash = Regex("""#\s*0*(\d{1,4})""")
+    private val paren = Regex("""\(\s*0*(\d{1,4})\s*\)""")
+    private val trailing = Regex("""(?<!\d)0*(\d{1,4})\s*$""")
+    private val junk = charArrayOf(' ', '-', ':', '#', '(', ')', ',', '[', ']')
+    private val spaces = Regex("\\s+")
+    private val nonAlnum = Regex("[^\\p{L}\\p{N}]+")
+
+    fun parse(fileName: String): Parsed {
+        val base = fileName.substringBeforeLast('.')
+            .replace('_', ' ').replace('.', ' ')
+            .replace(spaces, " ").trim()
+        var ep: Int? = null
+        var label: String? = null
+        var range: IntRange? = null
+        val s = season.find(base)
+        if (s != null) {
+            val sn = s.groupValues[1].toInt()
+            val en = s.groupValues[2].toInt()
+            ep = sn * 10000 + en
+            label = "S%02dE%02d".format(sn, en)
+            range = s.range
+        } else {
+            for (p in listOf(word, hash, paren, trailing)) {
+                val m = p.find(base) ?: continue
+                val n = m.groupValues[1].toIntOrNull() ?: continue
+                ep = n
+                label = "Episode $n"
+                range = m.range
+                break
+            }
+        }
+        val rest = if (range != null) base.removeRange(range) else base
+        val name = rest.trim(*junk).replace(spaces, " ").ifEmpty { base }
+        val key = name.lowercase().replace(nonAlnum, "")
+        return Parsed(if (key.isEmpty()) base.lowercase() else key, name, ep, label)
+    }
+}
+
+data class Pdf(val file: File, val modified: Long) {
+    val info: Parsed = SeriesParser.parse(file.name)
+}
 
 class PdfStore(context: Context) {
     private val prefs = context.applicationContext
@@ -86,10 +135,114 @@ class PdfStore(context: Context) {
         return out.distinctBy { it.file.path }
     }
 
-    /** Unread first (newest first), then already read (newest first). */
+    fun orderMode(): String = prefs.getString("order", "series") ?: "series"
+
+    fun setOrderMode(m: String) {
+        prefs.edit().putString("order", m).apply()
+    }
+
+    /**
+     * Series order: files are grouped by series, episodes run 1, 2, 3 whatever order they were
+     * downloaded in. Series with something unread come first, most recently downloaded first.
+     * Download order: unread first, newest first.
+     */
     fun queue(): List<Pdf> {
-        val all = scan().sortedByDescending { it.modified }
-        return all.filter { !isRead(it.file) } + all.filter { isRead(it.file) }
+        val all = scan()
+        if (orderMode() == "downloaded") {
+            val s = all.sortedByDescending { it.modified }
+            return s.filter { !isRead(it.file) } + s.filter { isRead(it.file) }
+        }
+        val groups = all.groupBy { it.info.key }.values.toList()
+        val ordered = groups.sortedWith(
+            compareBy<List<Pdf>>(
+                { g -> g.all { isRead(it.file) } },
+                { g -> -g.maxOf { it.modified } }
+            )
+        )
+        return ordered.flatMap { g ->
+            g.sortedWith(compareBy<Pdf>({ it.info.episode ?: Int.MAX_VALUE }, { it.modified }))
+        }
+    }
+
+    /** The next unread file after this one: next episode first, then the next series. */
+    fun nextUnread(current: File): Pdf? {
+        val q = queue()
+        val i = q.indexOfFirst { it.file.path == current.path }
+        if (orderMode() == "downloaded" || i < 0) {
+            return q.firstOrNull { it.file.path != current.path && !isRead(it.file) }
+        }
+        return q.drop(i + 1).firstOrNull { !isRead(it.file) }
+            ?: q.take(i).firstOrNull { !isRead(it.file) }
+    }
+
+    /** Series name, episodes read, episodes in the library. */
+    fun seriesProgress(f: File): Triple<String, Int, Int> {
+        val info = SeriesParser.parse(f.name)
+        val same = scan().filter { it.info.key == info.key }
+        return Triple(info.name, same.count { isRead(it.file) }, same.size)
+    }
+
+    // Reading stats, all stored on the device only
+
+    private fun today(): String = java.time.LocalDate.now().toString()
+
+    private fun days(): List<Long> =
+        (prefs.getStringSet("days", emptySet()) ?: emptySet())
+            .mapNotNull { runCatching { java.time.LocalDate.parse(it).toEpochDay() }.getOrNull() }
+            .sorted()
+
+    fun touchToday() {
+        val set = HashSet(prefs.getStringSet("days", emptySet()) ?: emptySet())
+        if (set.add(today())) prefs.edit().putStringSet("days", set).apply()
+    }
+
+    fun recordFinish(f: File, pages: Int) {
+        prefs.edit()
+            .putInt("finishes", prefs.getInt("finishes", 0) + 1)
+            .putInt("pages", prefs.getInt("pages", 0) + pages)
+            .putInt("c:" + f.path, prefs.getInt("c:" + f.path, 0) + 1)
+            .apply()
+        touchToday()
+    }
+
+    fun streak(): Int {
+        val d = days().toSet()
+        var day = java.time.LocalDate.now().toEpochDay()
+        if (day !in d) day -= 1
+        var n = 0
+        while (day in d) {
+            n++
+            day--
+        }
+        return n
+    }
+
+    fun bestStreak(): Int {
+        var best = 0
+        var run = 0
+        var prev = Long.MIN_VALUE
+        for (x in days()) {
+            run = if (x == prev + 1) run + 1 else 1
+            if (run > best) best = run
+            prev = x
+        }
+        return best
+    }
+
+    fun statsText(): String {
+        val all = scan()
+        val finished = all.count { isRead(it.file) }
+        val multi = all.groupBy { it.info.key }.values.filter { it.size > 1 }
+        val seriesDone = multi.count { g -> g.all { isRead(it.file) } }
+        return "PDFs in library: ${all.size}\n" +
+            "Finished: $finished\n" +
+            "Unread: ${all.size - finished}\n\n" +
+            "Series with 2 or more parts: ${multi.size}\n" +
+            "Series completed: $seriesDone\n\n" +
+            "Times you reached the last page: ${prefs.getInt("finishes", 0)}\n" +
+            "Pages finished: ${prefs.getInt("pages", 0)}\n\n" +
+            "Current streak: ${streak()} days\n" +
+            "Best streak: ${bestStreak()} days"
     }
 
     fun isRead(f: File): Boolean = prefs.getBoolean("r:" + f.path, false)
