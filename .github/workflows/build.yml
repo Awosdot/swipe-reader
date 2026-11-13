@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -23,7 +27,13 @@ jobs:
         with:
           gradle-version: 8.7
 
-      - name: Create signing key if the repo has none
+      - name: Reuse the same signing key on every build so updates install over the old app
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: signing-key-v1
+
+      - name: Create signing key if there is none yet
         run: |
           if [ ! -f debug.keystore ]; then
             keytool -genkeypair -keystore debug.keystore -storepass android \
