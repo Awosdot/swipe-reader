@@ -55,9 +55,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk swipe-reader.apk
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest swipe-reader.apk \
-            --title "Swipe Reader (latest)" \
-            --notes "Latest build. Download swipe-reader.apk and install it." \
+          cp app/build/outputs/apk/debug/app-debug.apk swipe-shelf.apk
+          gh release delete shelf --yes --cleanup-tag || true
+          gh release create shelf swipe-shelf.apk \
+            --title "Swipe Shelf (latest)" \
+            --notes "Latest build. Download swipe-shelf.apk and install it." \
             --target "${{ github.sha }}"
