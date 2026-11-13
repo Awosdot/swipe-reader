@@ -27,6 +27,10 @@ object SeriesParser {
         """\b(?:episode|ep|chapter|chap|ch|part|pt|vol|volume|book|issue)\b[\s#:\-]*0*(\d{1,4})""",
         RegexOption.IGNORE_CASE
     )
+    // Telegram channel style: "[001] Title" or "[Ch][024] Title"
+    private val bracket = Regex("""\[\s*0*(\d{1,4})\s*\]""")
+    private val tags = Regex("""\[[^\]]*\]""")
+    private val handles = Regex("""@\S+""")
     private val hash = Regex("""#\s*0*(\d{1,4})""")
     private val paren = Regex("""\(\s*0*(\d{1,4})\s*\)""")
     private val trailing = Regex("""(?<!\d)0*(\d{1,4})\s*$""")
@@ -49,7 +53,7 @@ object SeriesParser {
             label = "S%02dE%02d".format(sn, en)
             range = s.range
         } else {
-            for (p in listOf(word, hash, paren, trailing)) {
+            for (p in listOf(bracket, word, hash, paren, trailing)) {
                 val m = p.find(base) ?: continue
                 val n = m.groupValues[1].toIntOrNull() ?: continue
                 ep = n
@@ -59,8 +63,11 @@ object SeriesParser {
             }
         }
         val rest = if (range != null) base.removeRange(range) else base
-        val name = rest.trim(*junk).replace(spaces, " ").ifEmpty { base }
-        val key = name.lowercase().replace(nonAlnum, "")
+        // Drop channel tags like [MW], [Ch] and @handles so only the title is left
+        val cleaned = rest.replace(tags, " ").replace(handles, " ")
+        val name = cleaned.trim(*junk).replace(spaces, " ").ifEmpty { base }
+        // Telegram cuts long titles and swaps apostrophes for spaces, so match on the first 20 letters only
+        val key = name.lowercase().replace(nonAlnum, "").take(20)
         return Parsed(if (key.isEmpty()) base.lowercase() else key, name, ep, label)
     }
 }
@@ -92,6 +99,7 @@ class PdfStore(context: Context) {
             "Android/data/org.telegram.messenger/files/Telegram/Telegram Documents",
             "Android/data/org.telegram.messenger.web/files/Telegram/Telegram Documents",
             "Android/data/org.telegram.plus/files/Telegram/Telegram Documents",
+            "Android/data/org.thunderdog.challegram/files/documents",
             "Android/data/org.thunderdog.challegram/files/Telegram/Telegram Documents",
             "Download/Telegram"
         ).map { File(root, it) }
