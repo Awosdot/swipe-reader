@@ -3,7 +3,11 @@ package com.awoo.swipereader
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.FileObserver
@@ -11,10 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
-import android.text.format.DateUtils
-import android.view.GestureDetector
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -27,21 +28,20 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.viewpager2.widget.ViewPager2
-import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var store: PdfStore
-    private lateinit var pager: ViewPager2
+    private lateinit var grid: RecyclerView
     private lateinit var message: TextView
     private lateinit var emptyBox: LinearLayout
     private lateinit var topBar: LinearLayout
-    private lateinit var orderButton: TextView
+    private lateinit var sortButton: TextView
     private lateinit var streakView: TextView
     private lateinit var permBox: LinearLayout
-    private val adapter = CardAdapter()
+    private val shelf = ShelfAdapter()
     private val handler = Handler(Looper.getMainLooper())
     private val observers = ArrayList<FileObserver>()
     private val refreshTask = Runnable { refresh() }
@@ -55,9 +55,14 @@ class MainActivity : AppCompatActivity() {
         val root = FrameLayout(this)
         root.setBackgroundColor(ContextCompat.getColor(this, R.color.bg))
 
-        pager = ViewPager2(this)
-        pager.adapter = adapter
-        root.addView(pager, FrameLayout.LayoutParams(MATCH, MATCH))
+        val dpWidth = resources.displayMetrics.widthPixels / resources.displayMetrics.density
+        val spans = maxOf(2, (dpWidth / 170f).toInt())
+        grid = RecyclerView(this)
+        grid.layoutManager = GridLayoutManager(this, spans)
+        grid.adapter = shelf
+        grid.clipToPadding = false
+        grid.setPadding(dp(8), dp(56), dp(8), dp(16))
+        root.addView(grid, FrameLayout.LayoutParams(MATCH, MATCH))
 
         message = TextView(this).apply {
             gravity = Gravity.CENTER
@@ -78,15 +83,15 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(emptyBox, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        orderButton = link("Series order") { toggleOrder() }
+        sortButton = link("Recent") { toggleSort() }
         topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(link("Stats") { showStats() })
-            addView(orderButton)
+            addView(sortButton)
             addView(link("Folder") { pickFolder() })
         }
         root.addView(topBar, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(8)
+            topMargin = dp(4)
             rightMargin = dp(4)
         })
 
@@ -94,7 +99,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(fg)
             alpha = 0.7f
-            setPadding(dp(20), dp(20), dp(20), dp(20))
+            setPadding(dp(20), dp(16), dp(20), dp(16))
         }
         root.addView(streakView, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START))
 
@@ -105,7 +110,7 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
         val permText = TextView(this).apply {
-            text = "Swipe Reader needs access to your files so it can find the PDFs Telegram downloads. It only reads, and has no internet access."
+            text = "Swipe Shelf needs access to your files so it can find the PDFs Telegram downloads. It only reads, and has no internet access."
             textSize = 17f
             gravity = Gravity.CENTER
             setTextColor(fg)
@@ -190,7 +195,7 @@ class MainActivity : AppCompatActivity() {
     private fun refresh() {
         if (!hasPermission()) {
             permBox.visibility = View.VISIBLE
-            pager.visibility = View.GONE
+            grid.visibility = View.GONE
             emptyBox.visibility = View.GONE
             topBar.visibility = View.GONE
             streakView.visibility = View.GONE
@@ -199,22 +204,19 @@ class MainActivity : AppCompatActivity() {
         permBox.visibility = View.GONE
         topBar.visibility = View.VISIBLE
         streakView.visibility = View.VISIBLE
-        orderButton.text = if (store.orderMode() == "series") "Series order" else "Download order"
+        sortButton.text = if (store.sortMode() == "az") "A to Z" else "Recent"
         val streak = store.streak()
         streakView.text = if (streak > 0) "$streak day streak" else ""
-        val list = store.queue()
-        adapter.submit(list)
+        val list = store.series()
+        shelf.submit(list)
         if (list.isEmpty()) {
-            pager.visibility = View.GONE
+            grid.visibility = View.GONE
             emptyBox.visibility = View.VISIBLE
             message.text = "No PDFs found yet.\n\nLooking in:\n" + store.describe() +
                 "\n\nIf your Telegram PDFs are somewhere else, tap Choose folder."
         } else {
             emptyBox.visibility = View.GONE
-            pager.visibility = View.VISIBLE
-            // Land on the first unread episode so there is always something to read
-            val start = list.indexOfFirst { !store.isRead(it.file) }.coerceAtLeast(0)
-            pager.post { pager.setCurrentItem(start, false) }
+            grid.visibility = View.VISIBLE
         }
         // Folder may have been created since last time
         if (observers.isEmpty()) startWatching()
@@ -228,8 +230,8 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { onClick() }
     }
 
-    private fun toggleOrder() {
-        store.setOrderMode(if (store.orderMode() == "series") "downloaded" else "series")
+    private fun toggleSort() {
+        store.setSortMode(if (store.sortMode() == "az") "recent" else "az")
         refresh()
     }
 
@@ -252,20 +254,41 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(this, ReaderActivity::class.java).putExtra("path", pdf.file.path))
     }
 
+    /** Episode list for one series: tap any episode to start there. */
+    private fun showEpisodes(s: Series) {
+        val cont = store.continueEpisode(s)
+        val labels = s.episodes.map { p ->
+            val base = p.info.label ?: p.file.nameWithoutExtension.replace('_', ' ')
+            val page = store.lastPage(p.file)
+            val status = when {
+                store.isRead(p.file) -> "read"
+                page > 0 -> "page ${page + 1}"
+                else -> ""
+            }
+            if (status.isEmpty()) base else "$base   ($status)"
+        }.toTypedArray()
+        val d = AlertDialog.Builder(this)
+            .setTitle(s.name)
+            .setItems(labels) { _, which -> open(s.episodes[which]) }
+            .setNegativeButton("Close", null)
+            .show()
+        val idx = s.episodes.indexOfFirst { it.file.path == cont.file.path }
+        if (idx > 0) d.listView.setSelection(idx)
+    }
+
     class CardVH(
-        val root: LinearLayout,
-        val count: TextView,
-        val img: ImageView,
-        val title: TextView,
-        val meta: TextView,
-        val series: TextView,
-        val bar: ProgressBar
-    ) : RecyclerView.ViewHolder(root)
+        val card: LinearLayout,
+        val cover: ImageView,
+        val name: TextView,
+        val sub: TextView,
+        val bar: ProgressBar,
+        val action: TextView
+    ) : RecyclerView.ViewHolder(card)
 
-    inner class CardAdapter : RecyclerView.Adapter<CardVH>() {
-        private var items: List<Pdf> = emptyList()
+    inner class ShelfAdapter : RecyclerView.Adapter<CardVH>() {
+        private var items: List<Series> = emptyList()
 
-        fun submit(l: List<Pdf>) {
+        fun submit(l: List<Series>) {
             items = l
             notifyDataSetChanged()
         }
@@ -275,108 +298,101 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardVH {
             val c = parent.context
             val fg = ContextCompat.getColor(c, R.color.fg)
-            val root = LinearLayout(c).apply {
+            val night = (c.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+
+            val card = LinearLayout(c).apply {
                 orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(c.dp(24), c.dp(32), c.dp(24), c.dp(32))
-                layoutParams = RecyclerView.LayoutParams(MATCH, MATCH)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor(if (night) "#1E1F24" else "#F1F3F8"))
+                    cornerRadius = c.dp(14).toFloat()
+                }
+                clipToOutline = true
+                layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
+                    setMargins(c.dp(6), c.dp(6), c.dp(6), c.dp(6))
+                }
             }
-            val count = TextView(c).apply {
-                textSize = 13f
-                setTextColor(fg)
-                alpha = 0.6f
+            val cover = ImageView(c).apply {
+                scaleType = ImageView.ScaleType.MATRIX
+                setBackgroundColor(Color.parseColor(if (night) "#2A2B31" else "#E3E6EE"))
             }
-            val img = ImageView(c).apply {
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                adjustViewBounds = true
+            card.addView(cover, LinearLayout.LayoutParams(MATCH, c.dp(190)))
+
+            val body = LinearLayout(c).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(c.dp(10), c.dp(8), c.dp(10), c.dp(10))
             }
-            val title = TextView(c).apply {
-                textSize = 20f
+            val name = TextView(c).apply {
+                textSize = 14f
                 setTypeface(typeface, Typeface.BOLD)
-                gravity = Gravity.CENTER
+                setTextColor(fg)
+                minLines = 2
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
-                setTextColor(fg)
             }
-            val meta = TextView(c).apply {
-                textSize = 14f
+            val sub = TextView(c).apply {
+                textSize = 12f
                 setTextColor(fg)
                 alpha = 0.7f
-            }
-            val hint = TextView(c).apply {
-                text = "↑  Swipe up to read"
-                textSize = 14f
-                setTextColor(ContextCompat.getColor(c, R.color.accent))
-            }
-            root.addView(count, LinearLayout.LayoutParams(WRAP, WRAP))
-            root.addView(img, LinearLayout.LayoutParams(MATCH, 0, 1f).apply {
-                topMargin = c.dp(16)
-                bottomMargin = c.dp(16)
-            })
-            val series = TextView(c).apply {
-                textSize = 14f
-                gravity = Gravity.CENTER
-                setTextColor(ContextCompat.getColor(c, R.color.accent))
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
             }
             val bar = ProgressBar(c, null, android.R.attr.progressBarStyleHorizontal)
-            root.addView(title, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(series, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = c.dp(6) })
-            root.addView(bar, LinearLayout.LayoutParams(c.dp(180), c.dp(4)).apply { topMargin = c.dp(6) })
-            root.addView(meta, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = c.dp(6) })
-            root.addView(hint, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = c.dp(20) })
-            return CardVH(root, count, img, title, meta, series, bar)
+            val action = TextView(c).apply {
+                textSize = 13f
+                setTextColor(ContextCompat.getColor(c, R.color.accent))
+                setPadding(0, c.dp(8), 0, 0)
+            }
+            body.addView(name, LinearLayout.LayoutParams(MATCH, WRAP))
+            body.addView(sub, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = c.dp(2) })
+            body.addView(bar, LinearLayout.LayoutParams(MATCH, c.dp(3)).apply { topMargin = c.dp(8) })
+            body.addView(action, LinearLayout.LayoutParams(WRAP, WRAP))
+            card.addView(body, LinearLayout.LayoutParams(MATCH, WRAP))
+            return CardVH(card, cover, name, sub, bar, action)
         }
 
         override fun onBindViewHolder(h: CardVH, position: Int) {
-            val pdf = items[position]
-            h.title.text = pdf.file.nameWithoutExtension.replace('_', ' ')
-            val ago = DateUtils.getRelativeTimeSpanString(
-                pdf.modified, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
-            ).toString()
-            h.meta.text = ago
-            val state = if (store.isRead(pdf.file)) "read" else "new"
-            h.count.text = "${position + 1} of ${items.size}  ·  $state"
+            val s = items[position]
+            val cont = store.continueEpisode(s)
+            val total = s.episodes.size
+            val unread = s.episodes.count { !store.isRead(it.file) }
 
-            val same = items.filter { it.info.key == pdf.info.key }
-            if (same.size > 1) {
-                val read = same.count { store.isRead(it.file) }
-                val ep = pdf.info.label?.let { "  ·  $it" } ?: ""
-                h.series.text = pdf.info.name + ep + "  ·  $read of ${same.size} read"
-                h.bar.max = same.size
-                h.bar.progress = read
-                h.series.visibility = View.VISIBLE
+            h.name.text = s.name
+            if (total > 1) {
+                val lbl = cont.info.label ?: "next"
+                h.sub.text = "Continue $lbl  ·  $unread unread"
+                h.bar.max = total
+                h.bar.progress = total - unread
                 h.bar.visibility = View.VISIBLE
+                h.action.text = "All $total episodes"
+                h.action.visibility = View.VISIBLE
             } else {
-                h.series.visibility = View.GONE
+                h.sub.text = if (store.isRead(cont.file)) "Read" else "New"
                 h.bar.visibility = View.GONE
+                h.action.visibility = View.GONE
             }
 
-            h.img.setImageDrawable(null)
-            h.img.tag = pdf.file.path
-            Thumbs.load(pdf.file, 640) { t ->
-                if (h.img.tag == pdf.file.path) {
-                    h.img.setImageBitmap(t.bitmap)
-                    if (t.pages > 0) h.meta.text = "${t.pages} pages  ·  $ago"
-                }
-            }
-
-            val gd = GestureDetector(h.root.context, object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDown(e: MotionEvent): Boolean = true
-                override fun onSingleTapUp(e: MotionEvent): Boolean {
-                    open(pdf)
-                    return true
-                }
-                override fun onFling(
-                    e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float
-                ): Boolean {
-                    if (velocityY < -600f && abs(velocityY) > abs(velocityX)) {
-                        open(pdf)
-                        return true
+            h.cover.setImageDrawable(null)
+            h.cover.tag = cont.file.path
+            Thumbs.load(cont.file, 420) { t ->
+                val bmp = t.bitmap
+                if (bmp != null) {
+                    h.cover.post {
+                        if (h.cover.tag == cont.file.path && h.cover.width > 0) {
+                            h.cover.setImageBitmap(bmp)
+                            val sc = h.cover.width.toFloat() / bmp.width
+                            h.cover.imageMatrix = Matrix().apply { setScale(sc, sc) }
+                        }
                     }
-                    return false
                 }
-            })
-            h.root.setOnTouchListener { _, ev -> gd.onTouchEvent(ev) }
+            }
+
+            h.card.setOnClickListener { open(cont) }
+            h.card.setOnLongClickListener {
+                showEpisodes(s)
+                true
+            }
+            h.action.setOnClickListener { showEpisodes(s) }
         }
     }
 }

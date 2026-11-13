@@ -68,6 +68,7 @@ class ReaderActivity : AppCompatActivity() {
     private var ratios = FloatArray(0)
     private var nextFile: File? = null
     private var finishedShown = false
+    private var epLabel = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -206,6 +207,8 @@ class ReaderActivity : AppCompatActivity() {
         gen += 1
         val g = gen
         file = f
+        epLabel = SeriesParser.parse(f.name).label ?: ""
+        store.setLast(f)
         finishedShown = false
         nextCard.visibility = View.GONE
         ratios = FloatArray(0)
@@ -233,6 +236,10 @@ class ReaderActivity : AppCompatActivity() {
                     val start = if (store.isRead(f)) 0
                     else store.lastPage(f).coerceIn(0, maxOf(0, rs.size - 1))
                     (rv.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(start, 0)
+                    // Show which episode this is for a moment
+                    label.text = (if (epLabel.isNotEmpty()) "$epLabel  ·  " else "") +
+                        "${start + 1} / ${rs.size}"
+                    showLabel()
                 }
             } catch (e: Exception) {
                 main.post {
@@ -253,18 +260,22 @@ class ReaderActivity : AppCompatActivity() {
         if (first < 0) return
         bar.max = n
         bar.progress = last + 1
-        label.text = "${first + 1} / $n"
+        label.text = (if (epLabel.isNotEmpty()) "$epLabel  ·  " else "") + "${first + 1} / $n"
         if (!finishedShown && lm.findLastCompletelyVisibleItemPosition() >= n - 1) {
             finishedShown = true
             store.setRead(f, true)
             store.recordFinish(f, n)
-            val nxt = store.nextUnread(f)
+            val nxt = store.nextEpisode(f)
             val (seriesName, seriesRead, seriesTotal) = store.seriesProgress(f)
             val seriesDone = seriesTotal > 1 && seriesRead >= seriesTotal
+            val sameSeries = nxt != null &&
+                SeriesParser.parse(nxt.file.name).key == SeriesParser.parse(f.name).key
             nextFile = nxt?.file
             nextLabel.text = when {
+                sameSeries -> "Up next"
                 seriesDone && nxt != null -> "$seriesName complete. Next series"
                 seriesDone -> "$seriesName complete"
+                nxt != null -> "End of $seriesName. Next series"
                 else -> "Up next"
             }
             nextTitle.text = nxt?.file?.nameWithoutExtension?.replace('_', ' ') ?: "You are all caught up"

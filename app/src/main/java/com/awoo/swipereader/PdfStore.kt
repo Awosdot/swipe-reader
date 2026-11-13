@@ -76,6 +76,9 @@ data class Pdf(val file: File, val modified: Long) {
     val info: Parsed = SeriesParser.parse(file.name)
 }
 
+/** One shelf card: every downloaded episode of the same title, in episode order. */
+data class Series(val key: String, val name: String, val episodes: List<Pdf>)
+
 class PdfStore(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("swipe_reader", Context.MODE_PRIVATE)
@@ -156,10 +159,6 @@ class PdfStore(context: Context) {
      */
     fun queue(): List<Pdf> {
         val all = scan()
-        if (orderMode() == "downloaded") {
-            val s = all.sortedByDescending { it.modified }
-            return s.filter { !isRead(it.file) } + s.filter { isRead(it.file) }
-        }
         val groups = all.groupBy { it.info.key }.values.toList()
         val ordered = groups.sortedWith(
             compareBy<List<Pdf>>(
@@ -176,11 +175,62 @@ class PdfStore(context: Context) {
     fun nextUnread(current: File): Pdf? {
         val q = queue()
         val i = q.indexOfFirst { it.file.path == current.path }
-        if (orderMode() == "downloaded" || i < 0) {
+        if (i < 0) {
             return q.firstOrNull { it.file.path != current.path && !isRead(it.file) }
         }
         return q.drop(i + 1).firstOrNull { !isRead(it.file) }
             ?: q.take(i).firstOrNull { !isRead(it.file) }
+    }
+
+    fun sortMode(): String = prefs.getString("sort", "recent") ?: "recent"
+
+    fun setSortMode(m: String) {
+        prefs.edit().putString("sort", m).apply()
+    }
+
+    /** The shelf: one entry per title. Recent puts unfinished series with new downloads first. */
+    fun series(): List<Series> {
+        val list = scan().groupBy { it.info.key }.map { (k, g) ->
+            val eps = g.sortedWith(compareBy<Pdf>({ it.info.episode ?: Int.MAX_VALUE }, { it.modified }))
+            Series(k, g.maxByOrNull { it.info.name.length }!!.info.name, eps)
+        }
+        return if (sortMode() == "az") {
+            list.sortedBy { it.name.lowercase() }
+        } else {
+            list.sortedWith(
+                compareBy<Series>(
+                    { s -> s.episodes.all { isRead(it.file) } },
+                    { s -> -s.episodes.maxOf { it.modified } }
+                )
+            )
+        }
+    }
+
+    /** Remember which episode of a series was opened last. */
+    fun setLast(f: File) {
+        prefs.edit().putString("last:" + SeriesParser.parse(f.name).key, f.path).apply()
+    }
+
+    /** Where a tap on a shelf card should land: resume the open episode, else the next one, else episode 1. */
+    fun continueEpisode(s: Series): Pdf {
+        val lastPath = prefs.getString("last:" + s.key, null)
+        val idx = s.episodes.indexOfFirst { it.file.path == lastPath }
+        if (idx >= 0) {
+            val cur = s.episodes[idx]
+            if (!isRead(cur.file)) return cur
+            s.episodes.getOrNull(idx + 1)?.let { return it }
+        }
+        return s.episodes.firstOrNull { !isRead(it.file) } ?: s.episodes.first()
+    }
+
+    /** Next episode by number in the same series (even if already read), then the next unread series. */
+    fun nextEpisode(current: File): Pdf? {
+        val key = SeriesParser.parse(current.name).key
+        val eps = scan().filter { it.info.key == key }
+            .sortedWith(compareBy<Pdf>({ it.info.episode ?: Int.MAX_VALUE }, { it.modified }))
+        val i = eps.indexOfFirst { it.file.path == current.path }
+        if (i >= 0 && i + 1 < eps.size) return eps[i + 1]
+        return nextUnread(current)
     }
 
     /** Series name, episodes read, episodes in the library. */
@@ -265,7 +315,7 @@ data class Thumb(val bitmap: Bitmap?, val pages: Int)
 object Thumbs {
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private val cache = LruCache<String, Thumb>(12)
+    private val cache = LruCache<String, Thumb>(40)
 
     fun load(file: File, width: Int, done: (Thumb) -> Unit) {
         val key = file.path + ":" + file.lastModified()
