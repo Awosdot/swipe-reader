@@ -8,12 +8,13 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.awoo.swipereader"
+        // New id, so this installs as its own app next to the original Swipe Reader
+        applicationId = "com.awoo.swipeshelf"
         minSdk = 29
         // Android 10 target keeps direct access to /sdcard/Telegram via requestLegacyExternalStorage
         targetSdk = 29
         versionCode = 1
-        versionName = "1.0"
+        versionName = "2.0"
     }
 
     // Fixed signing key so every CI build can update the previous install
