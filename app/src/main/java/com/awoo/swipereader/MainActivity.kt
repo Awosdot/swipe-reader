@@ -34,6 +34,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var store: PdfStore
     private lateinit var pager: ViewPager2
     private lateinit var message: TextView
+    private lateinit var emptyBox: LinearLayout
+    private lateinit var folderButton: TextView
     private lateinit var permBox: LinearLayout
     private val adapter = CardAdapter()
     private val handler = Handler(Looper.getMainLooper())
@@ -55,12 +57,34 @@ class MainActivity : AppCompatActivity() {
 
         message = TextView(this).apply {
             gravity = Gravity.CENTER
-            textSize = 18f
+            textSize = 16f
             setTextColor(fg)
+        }
+        val chooseButton = Button(this).apply {
+            text = "Choose folder"
+            setOnClickListener { pickFolder() }
+        }
+        emptyBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
             setPadding(dp(32), dp(32), dp(32), dp(32))
             visibility = View.GONE
+            addView(message, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(chooseButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(24) })
         }
-        root.addView(message, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(emptyBox, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        folderButton = TextView(this).apply {
+            text = "Folder"
+            textSize = 14f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setOnClickListener { pickFolder() }
+        }
+        root.addView(folderButton, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(8)
+            rightMargin = dp(8)
+        })
 
         permBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -155,23 +179,33 @@ class MainActivity : AppCompatActivity() {
         if (!hasPermission()) {
             permBox.visibility = View.VISIBLE
             pager.visibility = View.GONE
-            message.visibility = View.GONE
+            emptyBox.visibility = View.GONE
+            folderButton.visibility = View.GONE
             return
         }
         permBox.visibility = View.GONE
+        folderButton.visibility = View.VISIBLE
         val list = store.queue()
         adapter.submit(list)
         if (list.isEmpty()) {
             pager.visibility = View.GONE
-            message.visibility = View.VISIBLE
-            message.text = "No PDFs yet.\n\nDownload one in Telegram and it will appear here by itself."
+            emptyBox.visibility = View.VISIBLE
+            message.text = "No PDFs found yet.\n\nLooking in:\n" + store.describe() +
+                "\n\nIf your Telegram PDFs are somewhere else, tap Choose folder."
         } else {
-            message.visibility = View.GONE
+            emptyBox.visibility = View.GONE
             pager.visibility = View.VISIBLE
             pager.setCurrentItem(0, false)
         }
         // Folder may have been created since last time
         if (observers.isEmpty()) startWatching()
+    }
+
+    private fun pickFolder() {
+        FolderPicker.show(this, store) {
+            refresh()
+            startWatching()
+        }
     }
 
     private fun open(pdf: Pdf) {

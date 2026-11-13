@@ -24,30 +24,66 @@ class PdfStore(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("swipe_reader", Context.MODE_PRIVATE)
 
-    /** Telegram folders that exist on this device. */
-    fun folders(): List<File> {
-        val root = Environment.getExternalStorageDirectory()
-        return listOf("Telegram/Telegram Files", "Telegram/Telegram Documents")
-            .map { File(root, it) }
-            .filter { it.isDirectory }
+    /** Folder the user picked, or null for automatic mode. */
+    fun chosenFolder(): File? =
+        prefs.getString("folder", null)?.let { File(it) }?.takeIf { it.isDirectory }
+
+    fun setChosenFolder(f: File?) {
+        val e = prefs.edit()
+        if (f == null) e.remove("folder") else e.putString("folder", f.path)
+        e.apply()
     }
 
-    /** Finished PDFs only: non-empty and not written to in the last 2 seconds. */
-    fun scan(): List<Pdf> {
-        val cutoff = System.currentTimeMillis() - 2000
-        val out = ArrayList<Pdf>()
-        for (dir in folders()) {
-            val files = dir.listFiles() ?: continue
-            for (f in files) {
-                if (f.isFile && f.length() > 0 &&
-                    f.name.endsWith(".pdf", ignoreCase = true) &&
+    /** Places Telegram and its forks usually put downloads (automatic mode). */
+    fun candidates(): List<File> {
+        val root = Environment.getExternalStorageDirectory()
+        return listOf(
+            "Telegram/Telegram Files",
+            "Telegram/Telegram Documents",
+            "Android/data/org.telegram.messenger/files/Telegram/Telegram Documents",
+            "Android/data/org.telegram.messenger.web/files/Telegram/Telegram Documents",
+            "Android/data/org.telegram.plus/files/Telegram/Telegram Documents",
+            "Android/data/org.thunderdog.challegram/files/Telegram/Telegram Documents",
+            "Download/Telegram"
+        ).map { File(root, it) }
+    }
+
+    /** Chosen folder if set, otherwise every automatic location that exists. */
+    fun folders(): List<File> {
+        val c = chosenFolder()
+        return if (c != null) listOf(c) else candidates().filter { it.isDirectory }
+    }
+
+    /** Human readable list of where the app is looking, for the empty screen. */
+    fun describe(): String {
+        val c = chosenFolder()
+        if (c != null) return c.path
+        val found = candidates().filter { it.isDirectory }
+        return if (found.isEmpty()) "No Telegram folder found on this device"
+        else found.joinToString("\n") { it.path }
+    }
+
+    private fun collect(dir: File, depth: Int, cutoff: Long, out: MutableList<Pdf>) {
+        val files = dir.listFiles() ?: return
+        for (f in files) {
+            if (f.isFile) {
+                if (f.length() > 0 && f.name.endsWith(".pdf", ignoreCase = true) &&
                     f.lastModified() < cutoff
                 ) {
                     out.add(Pdf(f, f.lastModified()))
                 }
+            } else if (f.isDirectory && depth > 0 && !f.name.startsWith(".")) {
+                collect(f, depth - 1, cutoff, out)
             }
         }
-        return out
+    }
+
+    /** Finished PDFs only: non-empty and not written to in the last 2 seconds. Looks 2 levels deep. */
+    fun scan(): List<Pdf> {
+        val cutoff = System.currentTimeMillis() - 2000
+        val out = ArrayList<Pdf>()
+        for (dir in folders()) collect(dir, 2, cutoff, out)
+        return out.distinctBy { it.file.path }
     }
 
     /** Unread first (newest first), then already read (newest first). */
