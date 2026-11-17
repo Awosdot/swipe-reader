@@ -1,103 +1,69 @@
-# Swipe Reader: get the APK onto your tablet
+# Glide apps: install and rebuild guide
 
-You do not need Android Studio. GitHub builds the APK for you, for free, and gives you a download link.
+Three separate PDF readers for Telegram downloads. Each has its own app id, name and icon, so they install next to your older Swipe Reader, Swipe Shelf and Flow Reader and never replace them. Everything is offline. None of them has internet permission and there are no ads.
 
-What you need: a free GitHub account, and `git` on your Mac. Check git by opening Terminal and running:
+| App | What it is | Icon | Download link |
+| --- | --- | --- | --- |
+| Glide Reader | Simple list of PDFs, one at a time | violet | https://github.com/Awosdot/swipe-reader/releases/download/glide-reader/glide-reader.apk |
+| Glide Shelf | Shelf that groups episodes by series, with reading stats | green | https://github.com/Awosdot/swipe-reader/releases/download/glide-shelf/glide-shelf.apk |
+| Glide Flow | Shelf plus one continuous scroll across episodes, tap lower screen to scroll | magenta | https://github.com/Awosdot/flow-reader/releases/download/glide-flow/glide-flow.apk |
+
+## 1. Install on the tablet
+
+1. Open the download link of the app on the tablet in Chrome.
+2. Tap the downloaded file `glide-....apk` (Chrome shows it at the bottom, or open the Files app, then Downloads).
+3. If Android says "For your security, your phone is not allowed to install unknown apps from this source", tap Settings, switch on Allow from this source, press Back, then tap Install.
+4. Open the app. When it asks for file access, tap Allow. If the shelf is empty, tap Choose folder and pick the folder that holds your PDFs. For Telegram X this is `Android/data/org.thunderdog.challegram/files/documents`.
+
+## 2. What is new in all three readers
+
+- Auto scroll: the round play button on the right edge. Tap it to start or pause. While it runs the screen stays awake. Holding a finger on the page pauses it. It stops by itself at the end.
+- Speed: tap the play button once more to reveal the speed buttons. Minus is slower, plus is faster (6 levels). The buttons hide again after 4 seconds, and your speed is remembered.
+- Side slider: drag the thin bar on the right edge up or down to move through the pages. A label shows where you are.
+- Jump to end: the button with the down arrow, shown next to the speed buttons. In Glide Flow it goes to the end of the current episode, and pressing it again goes to the end of the next one.
+- Tap the middle of the page in any reader to reveal the buttons.
+
+## 3. Only in Glide Shelf and Glide Flow
+
+- Reading time: tap Stats on the shelf. It shows an estimate of minutes read today, in total, and the daily average. The estimate counts the time between your touches and scrolls, and long pauses are capped, so treat it as a close guess.
+- Mark a whole series as read: long press a series card, then choose Mark all as read. Choose Mark all as unread to undo it. The same button is also in the episode list under All episodes.
+- Glide Flow only: tap the lower 30 percent of the screen to scroll down about one screen, tap the top 20 percent to scroll up.
+
+## 4. Rebuild after a change (command line)
+
+The code lives in two GitHub repos under Awosdot. The `swipe-reader` repo holds two apps in the folders `reader` and `shelf`. The `flow-reader` repo holds Glide Flow.
 
 ```
-git --version
-```
-
-If it is missing, macOS offers to install it. Accept, wait, then run the command again.
-
-## Step 1: Unzip the project
-
-In Terminal:
-
-```
-cd ~/Downloads
-unzip swipe-reader.zip
+git clone https://github.com/Awosdot/swipe-reader.git
 cd swipe-reader
-ls -a
 ```
 
-You should see `app`, `.github`, `debug.keystore`, `build.gradle.kts` and more. The `.github` folder is hidden in Finder, which is why we use Terminal and not drag and drop.
-
-## Step 2: Create an empty repo on GitHub
-
-1. Go to https://github.com/new while signed in as Awosdot.
-2. Repository name: `swipe-reader`
-3. Choose **Public** (needed so the tablet can download the APK without signing in).
-4. Leave every checkbox empty: no README, no .gitignore, no license.
-5. Click **Create repository**.
-
-The project holds no secrets. The signing key in it is a throwaway key for this one app.
-
-## Step 3: Push the project
-
-Still in the `swipe-reader` folder in Terminal:
+Edit the files, for example `shelf/app/src/main/java/com/awoo/glideshelf/MainActivity.kt`, then:
 
 ```
-git init -b main
 git add .
-git commit -m "Swipe Reader first version"
-git remote add origin https://github.com/Awosdot/swipe-reader.git
-git push -u origin main
+git commit -m "Describe your change"
+git push origin main
 ```
 
-If Terminal asks for a password, GitHub no longer accepts your account password there. Easier route: run `gh auth login` (if `gh` is installed), choose GitHub.com, HTTPS, browser login, then run the last command again.
+Open the repo on GitHub, click the Actions tab, and wait for a green tick (about 4 minutes). The release link in the table above then serves the new APK. Install it over the old one, since the signing key is kept between builds, so your reading progress stays.
 
-## Step 4: Wait for the build
+For Glide Flow use `git clone https://github.com/Awosdot/flow-reader.git` and the same three commands.
 
-1. Open https://github.com/Awosdot/swipe-reader/actions
-2. Click the newest run named **Build APK**.
-3. Wait for a green tick. The first build takes about 5 to 8 minutes.
+## 5. Rebuild without the command line
 
-If it shows a red cross, click the run, open the failed step, copy the last 30 lines of the error and paste them to Claude. This first build is also the first time the code is compiled, so expect that a fix may be needed.
+1. Go to the repo page on GitHub and open the folder that holds the file you want to change.
+2. Click the file, click the pencil icon, edit, then click Commit changes.
+3. Click the Actions tab and wait for the green tick.
 
-## Step 5: Download on the tablet
+## 6. Start from nothing (new GitHub repo)
 
-On the Lenovo tablet, open Chrome and go to:
+1. Go to https://github.com/new, type a repo name, keep Public, click Create repository.
+2. Click uploading an existing file. Drag in the contents of one project folder (for example everything inside `flow`). Make sure the hidden `.github` folder goes in too. Click Commit changes.
+3. The build starts by itself. When it is green, open the repo, click Releases on the right, and download the `.apk`.
 
-```
-https://github.com/Awosdot/swipe-reader/releases/download/latest/swipe-reader.apk
-```
+## 7. If something goes wrong
 
-Tap the downloaded file when Chrome offers it.
-
-## Step 6: Install
-
-1. If Android says "For your security, your tablet is not allowed to install unknown apps from this source", tap **Settings** and switch on **Allow from this source** for Chrome. Go back.
-2. Tap **Install**.
-3. If Play Protect warns about an unknown app, tap **More details** then **Install anyway**.
-4. Tap **Open**.
-
-## Step 7: First run
-
-1. Tap **Allow** on the storage permission. This happens once.
-2. The app opens straight onto your newest unread PDF from `Telegram/Telegram Files` (it also checks `Telegram/Telegram Documents`).
-3. Swipe up to read. Swipe sideways to browse other PDFs.
-4. At the last page a "Up next" card appears. Swipe up on it to open the next unread PDF.
-
-## Daily use
-
-Download a PDF in Telegram as normal, never tap Save to Files, then open Swipe Reader. It is already there. If the app is open while the download finishes, the new PDF appears by itself within a few seconds.
-
-## Updating the app later
-
-After any code change:
-
-```
-cd ~/Downloads/swipe-reader
-git add .
-git commit -m "describe the change"
-git push
-```
-
-Wait for the green tick, then download and install the APK again. It installs over the old version and keeps your reading progress, because every build uses the same signing key.
-
-## If something does not work
-
-- **PDF not appearing:** open the Files app and confirm the PDF is inside `Telegram/Telegram Files`. If it is in a different folder, tell Claude the exact path.
-- **Permission screen keeps showing:** tap **Allow access** again. If nothing pops up, it opens app settings: go to Permissions, then enable Storage.
-- **Release link gives 404:** the build has not finished or failed. Check the Actions tab.
+- Build shows a red cross: open Actions, click the failed run, click the red step, and copy the error text. Send it to Claude.
+- App says no PDFs found: tap Choose folder and pick the folder that holds the PDFs.
+- Install says "App not installed": uninstall any earlier build of the same Glide app first, then install again.

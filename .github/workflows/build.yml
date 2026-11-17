@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Glide Reader and Glide Shelf APKs
 
 on:
   push:
@@ -15,6 +15,17 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: reader
+            title: Glide Reader
+          - app: shelf
+            title: Glide Shelf
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +41,8 @@ jobs:
       - name: Reuse the same signing key on every build so updates install over the old app
         uses: actions/cache@v4
         with:
-          path: debug.keystore
-          key: signing-key-v1
+          path: ${{ matrix.app }}/debug.keystore
+          key: signing-key-glide-${{ matrix.app }}-v1
 
       - name: Create signing key if there is none yet
         run: |
@@ -47,17 +58,17 @@ jobs:
       - name: Keep a copy as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: swipe-reader-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: glide-${{ matrix.app }}-apk
+          path: ${{ matrix.app }}/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Publish APK to a release for one-tap download
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk swipe-shelf.apk
-          gh release delete shelf --yes --cleanup-tag || true
-          gh release create shelf swipe-shelf.apk \
-            --title "Swipe Shelf (latest)" \
-            --notes "Latest build. Download swipe-shelf.apk and install it." \
+          cp app/build/outputs/apk/debug/app-debug.apk glide-${{ matrix.app }}.apk
+          gh release delete glide-${{ matrix.app }} --yes --cleanup-tag || true
+          gh release create glide-${{ matrix.app }} glide-${{ matrix.app }}.apk \
+            --title "${{ matrix.title }} (latest)" \
+            --notes "Latest build. Download glide-${{ matrix.app }}.apk and install it." \
             --target "${{ github.sha }}"

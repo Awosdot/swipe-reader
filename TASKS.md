@@ -10,3 +10,7 @@
 - [ ] Pinch to zoom
 - [ ] Background service so new PDFs are indexed with the app closed
 - [ ] Settings (folder path, sort order)
+- [x] Auto scroll with on/off, speed buttons, side slider, jump to end
+- [x] Reading time estimate and mark whole series as read (shelf)
+- [x] Renamed apps (Glide Reader, Glide Shelf, Glide Flow) with new app ids
+- [ ] Test the three Glide builds on the tablet

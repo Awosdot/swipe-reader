@@ -1,5 +1,6 @@
 # Handoff
 
-State: full project written, never compiled (Android SDK hosts were blocked in the authoring sandbox).
-Next: push to GitHub, read the first Actions run, fix any compile errors from the log.
-Known gaps: no zoom, no background watcher, no share or settings screens.
+State: this repo now holds two apps, reader/ (Glide Reader) and shelf/ (Glide Shelf). One workflow builds both and publishes releases glide-reader and glide-shelf. Glide Flow lives in the flow-reader repo.
+Done: auto scroll, side slider, jump to end (all apps); reading time stats and mark series read (shelf).
+Older releases (latest, shelf) are the previous apps and are no longer rebuilt.
+Next: install the three Glide APKs on the tablet, test, report anything odd.
